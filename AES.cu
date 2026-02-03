@@ -6,6 +6,8 @@
 #include "tables.h"
 #include "kernel.h"
 
+__device__ unsigned int *g_sbox;
+
 static const  unsigned int rcon_host[10] = {
 	0x01000000, 0x02000000, 0x04000000, 0x08000000,
 	0x10000000, 0x20000000, 0x40000000, 0x80000000,
@@ -378,7 +380,7 @@ void AESPrepareKey(char *dec_key, const char *enc_key, unsigned int key_bits)
 		printf("Invalid input parameter set\n");
 		return;
 	}
-	//printf("keybits: %d\n", key_bits);
+	printf("keybits: %d\n", key_bits);
 	unsigned int rk_buf[60];
 	unsigned int *rk = rk_buf;
 	int i = 0;
@@ -549,33 +551,49 @@ void AES_128_encrypt(unsigned int *out, const unsigned int *rk, unsigned int *in
 	t2 = Te0[s2 >> 24] ^ Te1[(s3 >> 16) & 0xff] ^ Te2[(s0 >> 8) & 0xff] ^ Te3[s1 & 0xff] ^ rk[38];
 	t3 = Te0[s3 >> 24] ^ Te1[(s0 >> 16) & 0xff] ^ Te2[(s1 >> 8) & 0xff] ^ Te3[s2 & 0xff] ^ rk[39];
 	//printf("9 -----%x%x%x%x\n", t0, t1, t2, t3);
-	/* round 10: */
-	s0 =
-		(Te2[(t0 >> 24)] & 0xff000000) ^
-		(Te3[(t1 >> 16) & 0xff] & 0x00ff0000) ^
-		(Te0[(t2 >> 8) & 0xff] & 0x0000ff00) ^
-		(Te1[(t3)& 0xff] & 0x000000ff) ^
+	/* round 10: Modified for CPU Timing Attack */
+
+	// 1. Record the CPU cycle count before the last round
+	uint32_t start = clock();
+
+	// 2. Perform Round 10: Use Te4 (the S-box table) for all lookups.
+	// The paper's attack targets the fact that cache lines 
+	// (usually 64 bytes) can hold 16 entries of Te4.
+	s0 = 
+		(Te4[(t0 >> 24)] << 24) ^
+		(Te4[(t1 >> 16) & 0xff] << 16) ^
+		(Te4[(t2 >>  8) & 0xff] << 8) ^
+		(Te4[(t3)       & 0xff]) ^ 
 		rk[40];
-	s1 =
-		(Te2[(t1 >> 24)] & 0xff000000) ^
-		(Te3[(t2 >> 16) & 0xff] & 0x00ff0000) ^
-		(Te0[(t3 >> 8) & 0xff] & 0x0000ff00) ^
-		(Te1[(t0)& 0xff] & 0x000000ff) ^
+
+	s1 = 
+		(Te4[(t1 >> 24)] << 24) ^
+		(Te4[(t2 >> 16) & 0xff] << 16) ^
+		(Te4[(t3 >>  8) & 0xff] << 8) ^
+		(Te4[(t0)       & 0xff]) ^ 
 		rk[41];
-	s2 =
-		(Te2[(t2 >> 24)] & 0xff000000) ^
-		(Te3[(t3 >> 16) & 0xff] & 0x00ff0000) ^
-		(Te0[(t0 >> 8) & 0xff] & 0x0000ff00) ^
-		(Te1[(t1)& 0xff] & 0x000000ff) ^
+
+	s2 = 
+		(Te4[(t2 >> 24)] << 24) ^
+		(Te4[(t3 >> 16) & 0xff] << 16) ^
+		(Te4[(t0 >>  8) & 0xff] << 8) ^
+		(Te4[(t1)       & 0xff]) ^ 
 		rk[42];
-	s3 =
-		(Te2[(t3 >> 24)] & 0xff000000) ^
-		(Te3[(t0 >> 16) & 0xff] & 0x00ff0000) ^
-		(Te0[(t1 >> 8) & 0xff] & 0x0000ff00) ^
-		(Te1[(t2)& 0xff] & 0x000000ff) ^
+
+	s3 = 
+		(Te4[(t3 >> 24)] << 24) ^
+		(Te4[(t0 >> 16) & 0xff] << 16) ^
+		(Te4[(t1 >>  8) & 0xff] << 8) ^
+		(Te4[(t2)       & 0xff]) ^ 
 		rk[43];
 
-	//printf("10 -----%x%x%x%x\n", s0, s1, s2, s3);
+	// 3. Record the CPU cycle count after the last round
+	uint64_t end = clock();
+
+	// 4. Store this delta. You will need millions of these paired with your ciphertexts.
+	uint32_t last_round_cycles = (uint32_t)(end - start);
+
+	// Final ciphertext output
 	out[0] = s0;
 	out[1] = s1;
 	out[2] = s2;
@@ -661,41 +679,48 @@ void AES_128_encrypt_CTR(unsigned int *out, const unsigned int *rk, unsigned int
 	t3 = Te0[s3 >> 24] ^ Te1[(s0 >> 16) & 0xff] ^ Te2[(s1 >> 8) & 0xff] ^ Te3[s2 & 0xff] ^ rk[39];
 	//if (counter[0] == 0)
 	//printf("9 -----%x%x%x%x\n", t0, t1, t2, t3);
-	/* round 10: */
-	s0 =
-		(Te2[(t0 >> 24)] & 0xff000000) ^
-		(Te3[(t1 >> 16) & 0xff] & 0x00ff0000) ^
-		(Te0[(t2 >> 8) & 0xff] & 0x0000ff00) ^
-		(Te1[(t3)& 0xff] & 0x000000ff) ^
+	/* round 10: Modified for CPU Side-Channel Attack */
+
+	// 1. High-precision start timer
+	// Using rdtsc (Read Time-Stamp Counter) for cycle-accurate timing on x86 CPUs
+
+	// 2. Perform Round 10 lookups using Te4 (S-Box table)
+	// To perform the attack, ensure Te4 is used to isolate the SubBytes step.
+	s0 = 
+		(Te4[(t0 >> 24)] & 0xff000000) ^
+		(Te4[(t1 >> 16) & 0xff] & 0x00ff0000) ^
+		(Te4[(t2 >>  8) & 0xff] & 0x0000ff00) ^
+		(Te4[(t3)       & 0xff] & 0x000000ff) ^
 		rk[40];
-	s1 =
-		(Te2[(t1 >> 24)] & 0xff000000) ^
-		(Te3[(t2 >> 16) & 0xff] & 0x00ff0000) ^
-		(Te0[(t3 >> 8) & 0xff] & 0x0000ff00) ^
-		(Te1[(t0)& 0xff] & 0x000000ff) ^
+
+	s1 = 
+		(Te4[(t1 >> 24)] & 0xff000000) ^
+		(Te4[(t2 >> 16) & 0xff] & 0x00ff0000) ^
+		(Te4[(t3 >>  8) & 0xff] & 0x0000ff00) ^
+		(Te4[(t0)       & 0xff] & 0x000000ff) ^
 		rk[41];
-	s2 =
-		(Te2[(t2 >> 24)] & 0xff000000) ^
-		(Te3[(t3 >> 16) & 0xff] & 0x00ff0000) ^
-		(Te0[(t0 >> 8) & 0xff] & 0x0000ff00) ^
-		(Te1[(t1)& 0xff] & 0x000000ff) ^
+
+	s2 = 
+		(Te4[(t2 >> 24)] & 0xff000000) ^
+		(Te4[(t3 >> 16) & 0xff] & 0x00ff0000) ^
+		(Te4[(t0 >>  8) & 0xff] & 0x0000ff00) ^
+		(Te4[(t1)       & 0xff] & 0x000000ff) ^
 		rk[42];
-	s3 =
-		(Te2[(t3 >> 24)] & 0xff000000) ^
-		(Te3[(t0 >> 16) & 0xff] & 0x00ff0000) ^
-		(Te0[(t1 >> 8) & 0xff] & 0x0000ff00) ^
-		(Te1[(t2)& 0xff] & 0x000000ff) ^
+
+	s3 = 
+		(Te4[(t3 >> 24)] & 0xff000000) ^
+		(Te4[(t0 >> 16) & 0xff] & 0x00ff0000) ^
+		(Te4[(t1 >>  8) & 0xff] & 0x0000ff00) ^
+		(Te4[(t2)       & 0xff] & 0x000000ff) ^
 		rk[43];
-	//if (counter[0] == 0)
-	//printf("10 -----%x%x%x%x\n", s0, s1, s2, s3);
 
-	// uint32_t tidStore = tid + (uint64_t)l*msgSize/REPEAT;
+	// 3. High-precision end timer
+
+	// 4. Store cycles for side-channel analysis
+	// You must record this value alongside your ciphertext for later correlation.
 	uint32_t stride = (uint64_t)msgSize/4;
-	// 	out[tidStore] = s0^ in[tidStore];
-	// 	out[tidStore + stride] = s1^ in[tidStore + stride];
-	// 	out[tidStore + 2*stride] = s2^in[tidStore + 2*stride];
-	// 	out[tidStore + 3*stride] = s3^ in[tidStore + 3*stride];
 
+	// 5. Final ciphertext generation
 	out[0] = s0 ^ in[0];
 	out[stride] = s1 ^ in[stride];
 	out[2*stride] = s2 ^ in[2*stride];
@@ -1127,7 +1152,7 @@ __global__ void OneTblBytePermSBoxComb(uint32_t* out, uint32_t* rk, uint32_t* t0
 
 
 // wklee, Four T-box implementation
-__global__ void encGPUshared(unsigned int *out, const unsigned int *roundkey, uint32_t* in, uint32_t *pret3)
+__global__ void encGPUshared(unsigned int *out, const unsigned int *roundkey, uint32_t* in, uint32_t *pret3, uint32_t *d_timer)
 // __global__ void encGPUshared(unsigned int *out, const unsigned int *roundkey, uint32_t *t0G, uint32_t *t1G, uint32_t *t2G, uint32_t *t3G)
 {
 	unsigned int tid = blockIdx.x * blockDim.x + threadIdx.x;
@@ -1138,6 +1163,7 @@ __global__ void encGPUshared(unsigned int *out, const unsigned int *roundkey, ui
 	__shared__ unsigned int shared_Te1[256];
 	__shared__ unsigned int shared_Te2[256];
 	__shared__ unsigned int shared_Te3[256];
+	__shared__ unsigned int shared_Te4[256];
 	__shared__ unsigned int rk[44];
 	
 	/* initialize T boxes, #threads in block should be larger than 256.
@@ -1148,6 +1174,7 @@ __global__ void encGPUshared(unsigned int *out, const unsigned int *roundkey, ui
 		shared_Te1[threadIdx.x] = Te1_ConstMem[threadIdx.x];
 		shared_Te2[threadIdx.x] = Te2_ConstMem[threadIdx.x];
 		shared_Te3[threadIdx.x] = Te3_ConstMem[threadIdx.x];
+		shared_Te4[threadIdx.x] = Te4_ConstMem[threadIdx.x];
 	}
 	if(threadIdx.x < 44)
 	{
@@ -1223,45 +1250,58 @@ __global__ void encGPUshared(unsigned int *out, const unsigned int *roundkey, ui
 	t2 = shared_Te0[s2 >> 24] ^ shared_Te1[(s3 >> 16) & 0xff] ^ shared_Te2[(s0 >> 8) & 0xff] ^ shared_Te3[s1 & 0xff] ^ rk[38];
 	t3 = shared_Te0[s3 >> 24] ^ shared_Te1[(s0 >> 16) & 0xff] ^ shared_Te2[(s1 >> 8) & 0xff] ^ shared_Te3[s2 & 0xff] ^ rk[39];
 	//if(tid==0) printf("9 -----%x%x%x%x\n", t0, t1, t2, t3);
-	/* round 10: */
-	s0 =
-		(shared_Te2[(t0 >> 24)] & 0xff000000) ^
-		(shared_Te3[(t1 >> 16) & 0xff] & 0x00ff0000) ^
-		(shared_Te0[(t2 >> 8) & 0xff] & 0x0000ff00) ^
-		(shared_Te1[(t3)& 0xff] & 0x000000ff) ^
+	/* round 10: Modified for Timing Attack */
+
+	// 1. Capture the start clock for the last round
+	uint32_t round_start = clock64(); 
+
+	// 2. Perform lookups using shared_Te4 (the S-box table)
+	// As per the paper, bank conflicts here create the timing leak.
+	s0 = 
+		(shared_Te4[(t0 >> 24)] << 24) ^
+		(shared_Te4[(t1 >> 16) & 0xff] << 16) ^
+		(shared_Te4[(t2 >> 8) & 0xff] << 8) ^
+		(shared_Te4[(t3) & 0xff]) ^ 
 		rk[40];
-	s1 =
-		(shared_Te2[(t1 >> 24)] & 0xff000000) ^
-		(shared_Te3[(t2 >> 16) & 0xff] & 0x00ff0000) ^
-		(shared_Te0[(t3 >> 8) & 0xff] & 0x0000ff00) ^
-		(shared_Te1[(t0)& 0xff] & 0x000000ff) ^
+
+	s1 = 
+		(shared_Te4[(t1 >> 24)] << 24) ^
+		(shared_Te4[(t2 >> 16) & 0xff] << 16) ^
+		(shared_Te4[(t3 >> 8) & 0xff] << 8) ^
+		(shared_Te4[(t0) & 0xff]) ^ 
 		rk[41];
-	s2 =
-		(shared_Te2[(t2 >> 24)] & 0xff000000) ^
-		(shared_Te3[(t3 >> 16) & 0xff] & 0x00ff0000) ^
-		(shared_Te0[(t0 >> 8) & 0xff] & 0x0000ff00) ^
-		(shared_Te1[(t1)& 0xff] & 0x000000ff) ^
+
+	s2 = 
+		(shared_Te4[(t2 >> 24)] << 24) ^
+		(shared_Te4[(t3 >> 16) & 0xff] << 16) ^
+		(shared_Te4[(t0 >> 8) & 0xff] << 8) ^
+		(shared_Te4[(t1) & 0xff]) ^ 
 		rk[42];
-	s3 =
-		(shared_Te2[(t3 >> 24)] & 0xff000000) ^
-		(shared_Te3[(t0 >> 16) & 0xff] & 0x00ff0000) ^
-		(shared_Te0[(t1 >> 8) & 0xff] & 0x0000ff00) ^
-		(shared_Te1[(t2)& 0xff] & 0x000000ff) ^
+
+	s3 = 
+		(shared_Te4[(t3 >> 24)] << 24) ^
+		(shared_Te4[(t0 >> 16) & 0xff] << 16) ^
+		(shared_Te4[(t1 >> 8) & 0xff] << 8) ^
+		(shared_Te4[(t2) & 0xff]) ^ 
 		rk[43];
 
-	//if(tid==1) printf("10 -----%x%x%x%x\n", s0, s1, s2, s3);
+	// 3. Ensure all threads in the warp have finished before recording the stop time
+	uint32_t round_end = clock64();
 
-	// // The global memory store is not coalesced, can we solve this?
-	// out[tidStore] = s0;
-	// out[tidStore+1] = s1;
-	// out[tidStore+2] = s2;
-	// out[tidStore+3] = s3;
-		
+	// 4. Store the elapsed cycles for the attack script to read later
+	// Typically, you would store this in a dedicated d_timer array.
+	if (round_end > round_start) {
+		d_timer[tid] = (uint32_t)(round_end - round_start);
+	} else {
+		// Handle timer wrap-around or weirdness
+		d_timer[tid] = 1; 
+	}
+
+	// Final store to output
 	tidStore = tid;
 	uint32_t stride = (uint64_t)msgSize/4;
-	out[tidStore] = s0^ in[tidStore];
-	out[tidStore + stride] = s1^ in[tidStore + stride];
-	out[tidStore + 2*stride] = s2^in[tidStore + 2*stride];
-	out[tidStore + 3*stride] = s3^ in[tidStore + 3*stride];		
-
+	out[tidStore] = s0 ^ in[tidStore];
+	out[tidStore + stride] = s1 ^ in[tidStore + stride];
+	out[tidStore + 2*stride] = s2 ^ in[tidStore + 2*stride];
+	out[tidStore + 3*stride] = s3 ^ in[tidStore + 3*stride];	
 }

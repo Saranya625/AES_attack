@@ -25,7 +25,7 @@ void AESPrepareKey(char *dec_key, const char *enc_key, unsigned int key_bits);
 void AES_128_encrypt_CTR(unsigned int *out, const unsigned int *rk, unsigned int counter, uint32_t* in);
 void AES_128_encrypt_CTR_pret2(unsigned int *out, const unsigned int *rk, unsigned int counter, uint32_t* in, uint32_t *pret2, uint32_t *pret3);
 void AES_128_encrypt_CTR_pret3(unsigned int *out, const unsigned int *rk, unsigned int counter, uint32_t* in, uint32_t *pret2, uint32_t *pret3);
-__global__ void encGPUshared(unsigned int *out, const unsigned int *roundkey, uint32_t* in, uint32_t *pret3);
+__global__ void encGPUshared(unsigned int *out, const unsigned int *roundkey, uint32_t* in, uint32_t *pret3, uint32_t *d_timer);
 __global__ void OneTblBytePermReuse(uint32_t *out, uint32_t* rk, uint32_t* t0G, uint32_t* in, uint32_t *pret3); 
 __global__ void OneTblBytePermReuseUnroll(uint32_t *out, uint32_t* rk, uint32_t* t0G, uint32_t* in, uint32_t *pret2, uint32_t *pret3);
 __global__ void OneTblBytePermOri(uint32_t *out, uint32_t* rk, uint32_t* t0G, uint32_t* t4_0G, uint32_t* t4_1G, uint32_t* t4_2G, uint32_t* t4_3G, uint32_t* in); 
