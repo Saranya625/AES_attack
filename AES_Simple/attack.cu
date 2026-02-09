@@ -111,13 +111,15 @@ __global__ void aes_encrypt_kernel(
         for(int i=0;i<16;i++)
             state[i]=pt[offset+i];
 
+    // The first 9 rounds
         for(int r=0;r<9;r++){
             for(int i=0;i<16;i++)
                 state[i]=d_sbox[state[i]];
             shift_rows(state);
             mix_columns(state);
         }
-        
+
+    // The last round. I'm collecting the execution time of the entire warp (32*16=512 Bytes)
         __syncwarp();
         uint64_t start=clock64();
 
@@ -134,6 +136,7 @@ __global__ void aes_encrypt_kernel(
 
         shift_rows(state);
 
+    // Producing the ciphertext
         for(int i=0;i<16;i++)
             ct[offset+i]=state[i];
     }
@@ -154,7 +157,7 @@ __global__ void attack_kernel(
 
     __shared__ int bank_hits[32];
 
-    int inv_shift[16]={0,13,10,7,4,1,14,11,8,5,2,15,12,9,6,3};
+    int inv_shift[16]={0,13,10,7,4,1,14,11,8,5,2,15,12,9,6,3};    //To inverse the shiftRows function
 
     float localA=0, localB=0;
     int localCA=0, localCB=0;
@@ -168,8 +171,8 @@ __global__ void attack_kernel(
 
         uint8_t c = samples[s].cipher[lane][inv_shift[ATTACK_BYTE]];
 
-        uint8_t idx = dinv_sbox[c^guess];
-        int bank = (idx>>1)&31;
+        uint8_t idx = dinv_sbox[c^guess];        //Attack formula
+        int bank = (idx>>1)&31;                  //Bank Conflicts formula
 
         atomicAdd(&bank_hits[bank],1);
         __syncthreads();
@@ -178,7 +181,7 @@ __global__ void attack_kernel(
         if(lane==0){
             for(int b=0;b<32;b++)
                 if(bank_hits[b]>max_hits)
-                    max_hits=bank_hits[b];
+                    max_hits=bank_hits[b];        //Collecting the most bank conflicts in a single warp
 
             int conflicts=max_hits-1;
             float time=(float)samples[s].time;
@@ -293,6 +296,7 @@ int main(){
     int best_key=0;
     float all_scores[256];
 
+    //Take DoMs
     for(int k=0;k<256;k++){
         if(countA[k]==0||countB[k]==0){
             all_scores[k] = 0.0f;
