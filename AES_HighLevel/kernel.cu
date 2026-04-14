@@ -16,7 +16,6 @@ __global__ void test()
 
 void testAES(char* keyBuf)
 {
-	
     double kernelSpeed2 = 0;
     cudaEvent_t start, stop;
     float miliseconds = 0;
@@ -90,17 +89,19 @@ void testAES(char* keyBuf)
     /* ================= TRACE FILE ================= */
 
     FILE* traceFile = fopen("aes_traces.csv", "w");
-    fprintf(traceFile, "plaintext,timer\n");
+    fprintf(traceFile, "ciphertext,timer\n");
 
     srand(time(NULL));
+
+    size_t thread_count = (size_t)(gridSize / REPEAT) * threadSize;
+    size_t warp_count = thread_count / 32;
+    size_t stride = (uint64_t)msgSize / 4;
 
     /* ================= MAIN LOOP ================= */
 
     for (int iter = 0; iter < ITERATION; iter++)
     {
-        /* Random plaintext */
-        for (int i = 0; i < msgSize; i++)
-            inBuf[i] = ((uint32_t)rand() << 16) ^ rand();
+        memset(inBuf, 0, msgSize * sizeof(uint32_t));
 
         cudaMemcpy(dev_rk, m_EncryptKey, 60 * sizeof(uint32_t), cudaMemcpyHostToDevice);
         cudaMemcpy(dev_inBuf, inBuf, msgSize * sizeof(uint32_t), cudaMemcpyHostToDevice);
@@ -129,14 +130,22 @@ void testAES(char* keyBuf)
 
         cudaMemcpy(gpuBuf, dev_outBuf, msgSize * sizeof(uint32_t), cudaMemcpyDeviceToHost);
         cudaMemcpy(h_timer, d_timer, msgSize * sizeof(uint32_t), cudaMemcpyDeviceToHost);
-        cudaMemcpy(h_timer, d_timer, msgSize * sizeof(uint32_t), cudaMemcpyDeviceToHost);
 
         cudaEventElapsedTime(&miliseconds, start, stop);
         kernelSpeed2 += 8 * (4 * (msgSize / 1024)) / miliseconds;
 
-        /* Store traces */
-        for (int i = 0; i < msgSize; i++)
-            fprintf(traceFile, "%08x,%u\n", inBuf[i], h_timer[i]);
+        for (size_t warp = 0; warp < warp_count; warp++) {
+            size_t base = warp * 32;
+            for (int lane = 0; lane < 32; lane++) {
+                size_t tid = base + lane;
+                fprintf(traceFile, "%08x%08x%08x%08x",
+                        gpuBuf[tid],
+                        gpuBuf[tid + stride],
+                        gpuBuf[tid + 2 * stride],
+                        gpuBuf[tid + 3 * stride]);
+            }
+            fprintf(traceFile, ",%u\n", h_timer[base]);
+        }
     }
 
     fclose(traceFile);
@@ -182,7 +191,7 @@ int main(int argc, char** argv)
 	cudaDeviceSetSharedMemConfig(cudaSharedMemBankSizeEightByte);// Avoid bank conflict for 64 bit access. 
 	cudaDeviceGetSharedMemConfig(&pConfig);
 	//printf("Share mem config: %d\n", pConfig);
-	cudaDeviceSetCacheConfig(cudaFuncCachePreferNone);
+	cudaDeviceSetCacheConfig(cudaFuncCachePreferL1);
 	cudaDeviceProp deviceProp;
 	cudaGetDeviceProperties(&deviceProp, 0);
 	printf("\nGPU Compute Capability = [%d.%d], clock: %d asynCopy: %d MapHost: %d SM: %d\n",

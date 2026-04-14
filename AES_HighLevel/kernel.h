@@ -12,11 +12,11 @@
 #include <assert.h>
 
 __constant__ uint32_t rkC[60]; 
-#define msgSize 	256*1024*1024	// size in word (4 bytes)
+#define msgSize 	64*1024*1024
 #define threadSize 	1024	// Minimum 256 Threads
 #define REPEAT		32
 #define gridSize 	msgSize/threadSize/4 // Each thread encrypt one counter value, which is 16 bytes or 4 words.  
-#define ITERATION 	10	// Calculate the average time
+#define ITERATION 	1
 #define DEBUG 			// Check results against CPU
 #define pret3Size	msgSize/4/16777216
 #define pret2Size	msgSize/4/65536
