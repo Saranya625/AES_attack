@@ -36,6 +36,8 @@ RCON = [
     0x36000000,
 ]
 BITCOUNT16 = np.array([bin(i).count("1") for i in range(1 << 16)], dtype=np.uint8)
+TRUE_ORIGINAL = bytes.fromhex("000102030405060708090a0b0c0d0e0f")
+TRUE_LAST_ROUND = bytes.fromhex("13111d7fe3944a17f307a78b4d2b30c5")
 
 
 def sub_word(x):
@@ -114,3 +116,5 @@ original = invert_last_round_key(bytes(recovered))
 
 print("Best guess last round key", bytes(recovered).hex())
 print("Best guess original key", original.hex())
+print("True last round key", TRUE_LAST_ROUND.hex())
+print("True original key", TRUE_ORIGINAL.hex())
